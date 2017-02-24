@@ -1,4 +1,4 @@
-" Buffet Plugin for VIM > 7.3 version 2.10
+" Buffet Plugin for VIM > 7.3 version 2.10.1
 "
 " A fast, simple and easy to use pluggin for switching and managing buffers.
 "
@@ -43,6 +43,18 @@
 " Maintainer:	Sandeep.c.r<sandeepcr2@gmail.com>
 "
 "
+" 
+" Default colors for the helpline. You may adjust them in your .vimrc.
+if !hlexists("buffethelpline")
+	highlight buffethelpline guibg=black
+	highlight buffethelpline guifg=orange
+endif
+"
+" Assign a default shortcut if not defined in your .vimrc.
+if !hasmapto(':Bufferlist')
+	nmap <silent><Leader>b :Bufferlist<CR>
+endif 
+
 function! s:open_new_window(dim)
 	exe s:currentposition. ' '.a:dim . 'new buflisttempbuffer412393'  
 	set nonu
@@ -99,7 +111,7 @@ function! s:display_buffer_list(gotolastbuffer)
 			let l:maxlen = l:temp
 		endif
 	endfor
-	call setline(1,"Buffet-2.10 ( Enter Number to search for a buffer number )")
+	call setline(1,"Buffet-2.10.1 (Enter number to search for a buffer number)                                                    ")
 	let s:displayed = []
 	let s:last_buffer_line = 0
 	for l:i in s:bufrecent
@@ -152,10 +164,8 @@ function! s:display_buffer_list(gotolastbuffer)
 	exe "resize ".(len(s:displayed)+4)
 	call setline(l:line,"")
 	let l:line+=1
-	call setline(l:line,"Enter(Load buffer) | hh/v/-/c (Horizontal/Vertical/Vertical Diff Split/Clear Diff) | o(Maximize) | t(New tab) | m(Toggle detail) | g(Go to window) | d(Delete buffer) | x(Close window) ")
+	call setline(l:line,"Enter(Load buffer) | hh/v/-/c (Hor/Vert/Vert diff/Clear diff) | d(Del buff) | x(Close win) | o(Max) | g(Go to) ")
 	let l:fg = synIDattr(hlID('Statement'),'fg','Question')
-	exe 'highlight buffethelpline guibg=black'
-	exe 'highlight buffethelpline guifg=orange'
 	exe '2match buffethelpline /\%1l\|\%'.l:line.'l.\%>1c/'
 	if(a:gotolastbuffer==1)
 		call cursor(s:last_buffer_line,3)
@@ -168,10 +178,15 @@ function! s:display_buffer_list(gotolastbuffer)
 endfunction
 
 function! s:close()
+	let &timeoutlen = s:timeoutlen_bak
+	let &wrap = s:wrap_bak
 	if(exists("t:tlistbuf"))
 		unlet t:tlistbuf
 		let s:lineonclose = line('.')
 		:bdelete buflisttempbuffer412393
+		if (winnr('$') == 1)
+			call s:cleardiff()
+		endif
 		echo ''
 		exe s:sourcewindow. ' wincmd w'
 	endif
@@ -211,7 +226,7 @@ function! s:press(num)
 		let s:keybuf = s:keybuf . a:num
 	endif
 	setlocal modifiable
-	call setline(1 ,'Buffet-2.10 - Searching for buffer:'.s:keybuf.' (Use backspace to edit)')
+	call setline(1 ,'Buffet-2.10.1 - Searching for buffer:'.s:keybuf.' (Use backspace to edit)')
 	let l:index =  0
 	for l:i in s:displayed
 		if(l:i[0] == s:keybuf)
@@ -233,10 +248,17 @@ function! s:toggletop()
 	let s:currentposition = 'topleft'
 	call s:toggle(1)
 endfunction
-function! s:toggle(gotolastbuffer)
 
+function! s:toggle(gotolastbuffer)
 	let s:keybuf = ''
-	if(exists("t:tlistbuf"))
+	if(s:firstrun == 1)
+		let s:firstrun = 0
+		let s:timeoutlen_bak = &timeoutlen
+		let s:scrollopt_bak = &scrollopt
+		let s:wrap_bak = &wrap
+		let s:foldmethod_bak = &foldmethod
+	endif
+	if(exists("t:tlistbuf") || len(filter(range(1,bufnr('$')),'buflisted(v:val)')) == 0)
 		call s:close()
 		return 0
 	endif
@@ -301,6 +323,14 @@ function! s:toggle(gotolastbuffer)
 	nnoremap <buffer> <silent> M :call <sid>toggle_detail()<cr>
 	nnoremap <buffer> <silent> <BS> :call <sid>press(-1)<cr>
 	nnoremap <buffer> <silent> <Esc> :call <sid>close()<cr>
+	" Correct arrow keys in terminal
+	if(has('termresponse') && match(v:termresponse, "\<ESC>") >= 0)
+		setlocal timeoutlen=0
+		nnoremap <buffer> <silent> <ESC>\A <Up>
+		nnoremap <buffer> <silent> <ESC>\B <Down>
+		nnoremap <buffer> <silent> <ESC>\C <Right>
+		nnoremap <buffer> <silent> <ESC>\D <Left>
+	endif
 	augroup  Tlistaco1
 			autocmd!
 			au  BufLeave <buffer> call <sid>close()
@@ -317,6 +347,14 @@ function! s:cleardiff()
 	for i in range(1,winnr('$'))
 		call setwinvar(i,"&diff",0)
 		call setwinvar(i,"&scrollbind",0)
+		call setwinvar(i,"&scrollopt",s:scrollopt_bak)
+		call setwinvar(i,"&wrap",s:wrap_bak)
+		call setwinvar(i,"&foldmethod",s:foldmethod_bak)
+		call setwinvar(i,"&foldcolumn",0)
+		call setwinvar(i,"&foldenable",0)
+		if has("cursorbind")
+			call setwinvar(i,"&cursorbind",0)
+		endif
 	endfor
 endfunction
 function! s:deletebuffer(force)
@@ -444,28 +482,35 @@ function! s:removedifforsource()
 	if(exists("b:buffet_sourcewindowfordiff"))
 		call setwinvar(b:buffet_sourcewindowfordiff,"&diff",0)
 		call setwinvar(b:buffet_sourcewindowfordiff,"&scrollbind",0)
+		call setwinvar(b:buffet_sourcewindowfordiff,"&scrollopt",s:scrollopt_bak)
+		call setwinvar(b:buffet_sourcewindowfordiff,"&wrap",s:wrap_bak)
+		call setwinvar(b:buffet_sourcewindowfordiff,"&foldmethod",s:foldmethod_bak)
+		call setwinvar(b:buffet_sourcewindowfordiff,"&foldcolumn",0)
+		call setwinvar(b:buffet_sourcewindowfordiff,"&foldenable",0)
+		if has("cursorbind")
+			call setwinvar(b:buffet_sourcewindowfordiff,"&cursorbind",0)
+		endif
 	endif
 endfunction
 
 function! s:diff_split_buffer(bufferno,mode)
 	if(a:mode == 'v')
+		exe 'diffthis'
 		exe 'belowright vert '.a:bufferno. ' sbuf'
+		exe 'diffthis'
 	elseif(a:mode == 'h')
+		exe 'diffthis'
 		exe 'belowright ' .a:bufferno. ' sbuf'
+		exe 'diffthis'
 	endif
 	if(exists("s:buflinenos[a:bufferno]"))
 		exe "normal "+s:buflinenos[a:bufferno] + "gg"
 	endif
-	call setwinvar(s:sourcewindow,"&diff",1)
-	call setwinvar(s:sourcewindow,"&scrollbind",1)
 	let b:buffet_sourcewindowfordiff = s:sourcewindow
 	augroup  Tlistaco2
 			autocmd!
 			au  BufWinLeave <buffer> call <sid>removedifforsource()
 	augroup END
-
-	setlocal diff
-	setlocal scrollbind
 endfunction
 
 
